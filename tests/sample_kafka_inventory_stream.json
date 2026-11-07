@@ -1,0 +1,23 @@
+[
+  {
+    "SKU": "MAT-LUX-9901",
+    "Plant": "1010",
+    "StorageLocation": "0001",
+    "DeltaQuantity": 150.0,
+    "Timestamp": "2026-11-07T19:30:00Z"
+  },
+  {
+    "SKU": "MAT-LUX-9901",
+    "Plant": "1010",
+    "StorageLocation": "0001",
+    "DeltaQuantity": -30.0,
+    "Timestamp": "2026-11-07T19:30:02Z"
+  },
+  {
+    "SKU": "MAT-LUX-4420",
+    "Plant": "1020",
+    "StorageLocation": "0002",
+    "DeltaQuantity": -500.0,
+    "Timestamp": "2026-11-07T19:30:05Z"
+  }
+]
