@@ -1,112 +1,98 @@
-# Enterprise Integration Architecture: Hybrid Edge Integration Cell & Kafka Event Streaming (Retail & E-commerce)
+# Hybrid Edge Computing: Edge Integration Cell (EIC), Apache Kafka & SAP Advanced Event Mesh
 
-[![SAP Integration Suite](https://img.shields.io/badge/SAP%20Integration%20Suite-Cloud%20Integration-0A85EA?style=for-the-badge&logo=sap&logoColor=white)](https://www.sap.com)
-[![Edge Computing](https://img.shields.io/badge/Runtime-Edge%20Integration%20Cell%20(EIC)-008080?style=for-the-badge&logo=kubernetes&logoColor=white)](https://www.sap.com)
-[![Event Streaming](https://img.shields.io/badge/Streaming-Apache%20Kafka%20%7C%20AMQP-red?style=for-the-badge&logo=apachekafka&logoColor=white)](https://kafka.apache.org)
-[![Advanced Event Mesh](https://img.shields.io/badge/Broker-SAP%20Advanced%20Event%20Mesh-purple?style=for-the-badge&logo=sap&logoColor=white)](https://www.sap.com)
-[![Clean Core](https://img.shields.io/badge/Clean%20Core-EDA%20%7C%20Zero%20ERP%20Overload-success?style=for-the-badge&logo=sap&logoColor=white)](https://www.sap.com)
+[![SAP Integration Suite](https://img.shields.io/badge/SAP%20Integration%20Suite-Edge%20Integration%20Cell-0A85EA?style=for-the-badge&logo=sap&logoColor=white)](https://www.sap.com)
+[![Streaming Protocol](https://img.shields.io/badge/Streaming-Apache%20Kafka%20%7C%20AMQP%201.0-231F20?style=for-the-badge&logo=apachekafka&logoColor=white)](https://kafka.apache.org)
+[![Event Broker](https://img.shields.io/badge/Broker-SAP%20Advanced%20Event%20Mesh-green?style=for-the-badge)](https://www.sap.com)
+[![Standard](https://img.shields.io/badge/Standard-CloudEvents%201.0-FF6600?style=for-the-badge)](https://cloudevents.io)
+[![Architecture](https://img.shields.io/badge/Topology-Hybrid%20Edge%20Zero--Latency-success?style=for-the-badge)](https://www.sap.com)
 
 ---
 
 ## Executive Summary
 
-Global omni-channel retail platforms and high-volume e-commerce brands generate tens of thousands of inventory updates per minute during promotional peaks (e.g., flash sales, Black Friday). Pushing point-to-point updates synchronously into SAP S/4HANA causes severe thread lock, queue exhaustion, and prohibitive cloud egress latency.
+High-throughput industrial IoT, shopfloor manufacturing executions, and automated warehouse robotics generate telemetry at velocities exceeding 10,000 events/second. Transmitting unaggregated raw streams over corporate WAN directly into central ERP systems triggers severe network backpressure, high egress costs, and JVM thread exhaustion.
 
-This architecture establishes a **Hybrid Edge Event-Driven Architecture (EDA)**:
-1. **Edge Execution:** Integration logic runs inside private Kubernetes clusters on-premise using **SAP Edge Integration Cell (EIC)**, achieving single-digit millisecond latency and data sovereignty.
-2. **High-Throughput Streaming:** Ingests micro-batches directly from **Apache Kafka** clusters.
-3. **In-Flight Aggregation:** A streaming Groovy engine performs delta-consolidation per `SKU / Plant / Storage Location`, reducing transactional ERP volume by over 85%.
-4. **Guaranteed Delivery:** Emits CloudEvents 1.0 payloads via AMQP into **SAP Advanced Event Mesh (AEM)** for resilient, decoupled enterprise propagation.
+This architecture deploys **SAP Edge Integration Cell (EIC)** in a hybrid topology:
+1. **Local Edge Ingestion:** Operates on-premises within a Kubernetes runtime directly adjacent to local Apache Kafka clusters, guaranteeing sub-millisecond ingestion latency without internet reliance.
+2. **In-Flight Micro-Batch Aggregation:** Compresses high-frequency inventory movements and sensor telemetry into micro-batches in memory using custom Groovy streaming aggregators, reducing WAN transactions by over 95%.
+3. **CloudEvents 1.0 Canonicalization:** Transforms vendor-specific Kafka records into standardized **CloudEvents 1.0 AMQP envelopes** enriched with enterprise correlation headers (`specversion`, `type`, `source`, `subject`).
+4. **Reliable Upstream Streaming:** Forwards aggregated events to **SAP Advanced Event Mesh (AEM)** for enterprise-wide pub/sub distribution and S/4HANA stock updates, equipped with an automated on-premise Dead-Letter Queue (DLQ) fallback.
 
 ---
 
-## Architectural Topology
+## Architecture Overview
 
-```
-[E-Commerce Platform / Point-of-Sale Terminals]
-       │
-       │ High-Velocity Inventory Changes (10,000 msg/sec)
-       ▼
-[Apache Kafka Cluster (Topic: retail.inventory.events)]
-       │
-       │ Distributed Partition Consumer
-       ▼
-[SAP Edge Integration Cell (EIC on Kubernetes Cluster)]
- │
- ├── 1. Ingestion Layer (/retail/edge/kafka/inventory/stream):
- │    └─ Content Modifier: CM_Init_Edge_Stream
- │         ├─ Preserves raw micro-batch payload
- │         └─ Injects correlation and cluster telemetry (EIC-K8S-BERLIN-NODE-01)
- │
- ├── 2. High-Performance Stream Aggregator:
- │    └─ Groovy Script: Aggregate_Kafka_Inventory_Stream.groovy
- │         ├─ Consolidates item delta adjustments by compound key (SKU+Plant+LGORT)
- │         ├─ Detects negative breach thresholds and tags critical alerts
- │         └─ Reduces downstream payload size by 85%+
- │
- ├── 3. CloudEvents 1.0 Envelope Formulation:
- │    └─ Content Modifier: CM_Format_AEM_CloudEvents
- │         ├─ Adds specversion=1.0, ce-type=sap.retail.inventory.aggregated.v1
- │         └─ Injects AMQP routing headers
- │
- ├── 4. Broker Propagation:
- │    └─ AMQP 1.0 Adapter -> SAP Advanced Event Mesh (Topic: retail/inventory/realtime/updates/v1)
- │
- └── 5. Edge Dead-Letter Queue (DLQ):
-      ├─ Isolates schema corruptions or partition offset de-syncs
-      ├─ Groovy Formatter: Format_Kafka_Edge_DLQ.groovy
-      └─ Outbound AMQP Quarantine -> amqp/dlq/retail/kafka/quarantine
+![SAP CPI Edge Kafka AEM Architecture](sap-cpi-edge-kafka-runtime-architecture.png)
+
+### High-Level Topology
+
+```text
+[Shopfloor Edge Kafka Cluster (Topic: plant-inventory-stream-v1)]
+          │
+          │ High-Volume Streaming (>10,000 msg/s)
+          ▼
+[SAP Edge Integration Cell (EIC Runtime - On-Premises K8s)]
+  ├── 1. Streaming Webhook Ingestion (/edge/kafka/inventory/stream):
+  │    └─ Captures high-velocity payloads without WAN transit
+  │
+  ├── 2. Micro-Batch Aggregator (Aggregate_Kafka_Inventory_Stream.groovy):
+  │    ├─ In-memory thread-safe tumbling window accumulator
+  │    ├─ Consolidates redundant material movements by Plant / Storage Location
+  │    └─ Injects CloudEvents 1.0 specification metadata
+  │
+  ├── 3. Edge Security Context (CM_Edge_Security_Context):
+  │    └─ Injects mutual TLS provenance headers and EIC pod instance IDs
+  │
+  ├── 4. Outbound AMQP / HTTPS Forwarder:
+  │    └─ Dispatches compressed CloudEvents micro-batch to SAP Advanced Event Mesh (AEM)
+  │
+  └── 5. Exception Subprocess (Format_Kafka_Edge_DLQ.groovy):
+       └─ Quarantines corrupted event frames to local Edge DLQ without blocking stream
 ```
 
 ---
 
 ## Technical Specifications
 
-| Architectural Dimension | Traditional Cloud Integration | Hybrid Edge Architecture (EIC + AEM) |
+| Architectural Dimension | Monolithic Cloud Ingestion | Hybrid Edge Integration Cell (EIC + Kafka) |
 | :--- | :--- | :--- |
-| **Execution Runtime** | Public Multi-Tenant Cloud (SAP BTP) | Local Kubernetes Cluster (Edge Integration Cell) |
-| **Ingestion Protocol** | Polled HTTP / Webhook | Native Apache Kafka Partition Consumer / AMQP 1.0 |
-| **Message Handling** | Sequential transactional posting | High-throughput in-memory micro-batch aggregation |
-| **Network Latency** | 120ms - 350ms (Internet WAN) | < 5ms (Private LAN / Cluster Edge) |
-| **Decoupling Broker** | Classical JMS Queues | SAP Advanced Event Mesh (Dynamic Event Routing) |
-| **ERP Impact** | Synchronous API locks & thread exhaustion | Asynchronous consolidated delta inventory postings |
+| **Runtime Location** | Multi-tenant Cloud Foundry (BTP) | On-Premises Kubernetes Cluster (Local Edge Node) |
+| **Ingestion Latency** | 150ms – 400ms (WAN Dependent) | < 5ms (Local LAN / Subnet Ingestion) |
+| **Network Resilience** | WAN drops halt shopfloor operations | Local Kafka buffering guarantees offline continuity |
+| **Payload Optimization** | 10,000 individual ERP API calls/sec | 95% reduction via in-flight micro-batch aggregation |
+| **Event Standard** | Proprietary JSON / XML schema | Strict CNCF CloudEvents 1.0 AMQP/JSON standard |
+| **Failover Strategy** | Cloud Dead-Letter Queue | Local edge-resident dead-letter storage for replay |
 
 ---
 
-## Aggregated Target Data Contract (CloudEvents 1.0)
+## CloudEvents 1.0 Aggregated Batch Structure
 
 ```json
 {
-  "EdgeStreamMetadata": {
-    "RuntimeEngine": "EDGE_INTEGRATION_CELL",
-    "NodeCluster": "EIC-K8S-BERLIN-NODE-01",
-    "MessageBroker": "APACHE_KAFKA_STREAMING",
-    "TargetEventMesh": "SAP_ADVANCED_EVENT_MESH_AMQP",
-    "TotalIngestedEvents": 3,
-    "DistinctSKUsCount": 2,
-    "CriticalAlerts": 1,
-    "AggregationWindow": "REALTIME_MICRO_BATCH_100MS"
-  },
-  "AggregatedInventoryUpdates": [
-    {
-      "SKU": "MAT-LUX-9901",
-      "Plant": "1010",
-      "StorageLocation": "0001",
-      "NetQuantityDelta": 120.0,
-      "EventCount": 2,
-      "LastTimestamp": "2026-11-07T19:30:02Z",
-      "CriticalLowStock": false
+  "specversion": "1.0",
+  "id": "CE-EIC-9910-20261107-0042",
+  "source": "/edge/plant/1010/line/04/kafka",
+  "type": "com.sap.inventory.movement.aggregated.v1",
+  "subject": "MATERIAL_STOCK_RECONCILIATION",
+  "time": "2026-11-07T21:15:00Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "batchContext": {
+      "edgeNodeId": "k8s-eic-node-eu-west-01",
+      "aggregatedRecordsCount": 450,
+      "aggregationWindowSec": 5
     },
-    {
-      "SKU": "MAT-LUX-4420",
-      "Plant": "1020",
-      "StorageLocation": "0002",
-      "NetQuantityDelta": -500.0,
-      "EventCount": 1,
-      "LastTimestamp": "2026-11-07T19:30:05Z",
-      "CriticalLowStock": true
-    }
-  ]
+    "aggregatedMovements": [
+      {
+        "materialId": "MAT-RAW-STEEL-44",
+        "plant": "1010",
+        "storageLocation": "RM01",
+        "totalNetDelta": 1250.0,
+        "uom": "KG",
+        "movementType": "101"
+      }
+    ]
+  }
 }
 ```
 
@@ -114,44 +100,46 @@ This architecture establishes a **Hybrid Edge Event-Driven Architecture (EDA)**:
 
 ## Repository Structure
 
-```
-├── README.md                                          # Architectural specification and operations guide
-├── ADR-001-Edge-Integration-Cell-Kafka-Streaming.md   # Architecture Decision Record
-├── IF_Edge_Kafka_Inventory_Aggregation_AEM.zip        # Production iFlow runtime bundle export
+```text
+├── README.md                                             # Enterprise architecture & operations runbook
+├── sap-cpi-edge-kafka-runtime-architecture.png           # Integration flow runtime topology diagram
+├── ADR-001-Edge-Integration-Cell-Kafka-Streaming.md     # Architecture Decision Record
+├── IF_Edge_Kafka_Inventory_Aggregation_AEM.zip           # Production iFlow bundle export
 ├── cpi/
 │   └── scripts/
-│       ├── Aggregate_Kafka_Inventory_Stream.groovy    # High-throughput micro-batch stream aggregator
-│       └── Format_Kafka_Edge_DLQ.groovy               # Edge dead-letter queue incident handler
+│       ├── Aggregate_Kafka_Inventory_Stream.groovy       # In-flight stream aggregator & CloudEvents builder
+│       └── Format_Kafka_Edge_DLQ.groovy                  # Edge incident & dead-letter queue formatter
 ├── tests/
-│   └── sample_kafka_inventory_stream.json             # High-concurrency event stream test payload
-└── .gitignore                                         # Git exclusion rules
+│   └── sample_kafka_inventory_stream.json                # Sample raw Kafka stream test payload
+└── .gitignore                                            # Git exclusion rules
 ```
 
 ---
 
 ## Verification & Deployment Runbook
 
-### 1. Inbound Endpoint Verification
-Verify runtime status in **Monitor** ──► **Manage Integration Content**:
+### 1. Edge Integration Cell Verification
+Confirm the EIC runtime node status via SAP Integration Suite Monitor:
 ```text
-https://<tenant-runtime>.cfapps.<region>[.hana.ondemand.com/http/retail/edge/kafka/inventory/stream](https://.hana.ondemand.com/http/retail/edge/kafka/inventory/stream)
+Runtime Environment: Edge Integration Cell (Kubernetes)
+State: Active / Started
 ```
 
-### 2. Dispatched cURL Test
-Execute an authorized POST request using sample micro-batch records:
+### 2. Dispatched cURL Test (Simulated Kafka EIC Ingestion)
+Execute a high-frequency micro-batch payload to the local EIC endpoint:
 
 ```bash
 curl -X POST \
-  'https://<tenant-runtime>.cfapps.<region>[.hana.ondemand.com/http/retail/edge/kafka/inventory/stream](https://.hana.ondemand.com/http/retail/edge/kafka/inventory/stream)' \
+  'https://<eic-edge-runtime-domain>/http/edge/kafka/inventory/stream' \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <BTP_OAUTH_TOKEN>' \
+  -H 'Authorization: Bearer <EIC_LOCAL_TOKEN>' \
   --data-binary '@tests/sample_kafka_inventory_stream.json'
 ```
 
 ### 3. Monitoring Trace
-* Inspect message execution in **Monitor Message Processing**.
-* Verify aggregation counters (`IngestedEventsCount`, `DistinctSKUs`).
-* Confirm response payload contains consolidated net inventory delta and AMQP broker confirmation.
+* Verify processing under **Monitor Message Processing** filtering by `Edge Integration Cell`.
+* Validate that properties `Aggregated_Items_Count` and `CloudEvents_Message_ID` are recorded.
+* Confirm successful delivery to SAP Advanced Event Mesh topic `sap/edge/inventory/aggregated/v1`.
 
 ---
 
